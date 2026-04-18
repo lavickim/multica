@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+apps/web/node_modules
+apps/web/.next
+test-results
+playwright-report
+server/bin
+.env
+.env.*
+*.log
+

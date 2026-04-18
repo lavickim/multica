@@ -44,6 +44,7 @@ No more copy-pasting prompts. No more babysitting runs. Your agents show up on t
 - **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
 - **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
+- **Single-Service Docker** — the repository Dockerfile can serve the Next.js UI, Go API, and WebSocket endpoint from one container.
 
 ## Getting Started
 
@@ -59,9 +60,8 @@ cd multica
 cp .env.example .env
 # Edit .env — at minimum, change JWT_SECRET
 
-docker compose up -d                              # Start PostgreSQL
-cd server && go run ./cmd/migrate up && cd ..     # Run migrations
-make start                                         # Start the app
+docker build -t multica .
+docker run --rm -p 8080:8080 --env-file .env multica
 ```
 
 See the [Self-Hosting Guide](SELF_HOSTING.md) for full instructions.

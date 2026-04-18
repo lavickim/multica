@@ -21,6 +21,29 @@ Additionally, each user who wants to run AI agents locally installs the **`multi
   - Node.js 20+ and pnpm 10.28+ (to build the frontend)
   - PostgreSQL 17 with the pgvector extension
 
+## Quick Start (Single Service Docker)
+
+The repository Dockerfile can now run the backend API, WebSocket endpoint, and Next.js web app inside a single container. This is the simplest option for Railway-style deployments where you want one public service URL.
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+cp .env.example .env
+```
+
+Edit `.env` with your production values, then build and run:
+
+```bash
+docker build -t multica .
+docker run --rm -p 8080:8080 --env-file .env multica
+```
+
+In this mode:
+
+- `/api`, `/auth`, `/health`, and `/ws` are served by the Go backend
+- all other routes are served by the Next.js web app
+- the container runs migrations on startup before serving traffic
+
 ## Quick Start (Docker Compose)
 
 ```bash
@@ -107,6 +130,16 @@ For file uploads and attachments, configure S3 and CloudFront:
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
+### Single-Container Runtime
+
+When using the repository Dockerfile, the public container port is still provided via `PORT`, but the internal processes use:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MULTICA_BACKEND_PORT` | `8081` | Internal Go backend port inside the container |
+| `MULTICA_FRONTEND_PORT` | `3000` | Internal Next.js frontend port inside the container |
+| `MULTICA_FRONTEND_HOST` | `0.0.0.0` | Internal Next.js bind host |
+
 ### CLI / Daemon
 
 These are configured on each user's machine, not on the server:
@@ -151,6 +184,8 @@ cd server && go run ./cmd/migrate up
 ```
 
 ## Reverse Proxy
+
+If you use the repository Dockerfile, you do not need an external reverse proxy between the Multica web app and backend API. The container already proxies web traffic to the Next.js frontend and `/api`, `/auth`, `/health`, `/ws` to the Go backend.
 
 In production, put a reverse proxy in front of both the backend and frontend to handle TLS and routing.
 
