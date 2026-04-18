@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -156,6 +158,29 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func fixtureAgentID(t *testing.T) string {
+	t.Helper()
+
+	var agentID string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("failed to find fixture agent: %v", err)
+	}
+	return agentID
+}
+
+type failingEnqueueTaskService struct {
+	*service.TaskService
+	err error
+}
+
+func (f failingEnqueueTaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return db.AgentTaskQueue{}, f.err
+}
+
 func TestIssueCRUD(t *testing.T) {
 	// Create
 	w := httptest.NewRecorder()
@@ -249,6 +274,114 @@ func TestIssueCRUD(t *testing.T) {
 	testHandler.GetIssue(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssue after delete: expected 404, got %d", w.Code)
+	}
+}
+
+func TestCreateIssueFailsWhenTaskEnqueueFails(t *testing.T) {
+	agentID := fixtureAgentID(t)
+	title := "Create issue should fail when task enqueue fails"
+	originalTaskService := testHandler.TaskService
+	originalTaskServiceFactory := testHandler.TaskServiceFactory
+	failingService := failingEnqueueTaskService{
+		TaskService: service.NewTaskService(testHandler.Queries, testHandler.Hub, testHandler.Bus),
+		err:         errors.New("forced task insert failure"),
+	}
+	testHandler.TaskService = failingService
+	testHandler.TaskServiceFactory = func(*db.Queries) taskQueueService {
+		return failingService
+	}
+	t.Cleanup(func() {
+		testHandler.TaskService = originalTaskService
+		testHandler.TaskServiceFactory = originalTaskServiceFactory
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         title,
+		"status":        "todo",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+
+	testHandler.CreateIssue(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateIssue: expected 500 when task enqueue fails, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var issueCount int
+	err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`,
+		testWorkspaceID, title,
+	).Scan(&issueCount)
+	if err != nil {
+		t.Fatalf("failed to count issues: %v", err)
+	}
+	if issueCount != 0 {
+		t.Fatalf("expected issue creation to roll back, found %d persisted issues", issueCount)
+	}
+}
+
+func TestUpdateIssueFailsWhenTaskEnqueueFails(t *testing.T) {
+	agentID := fixtureAgentID(t)
+	originalTaskService := testHandler.TaskService
+	originalTaskServiceFactory := testHandler.TaskServiceFactory
+	failingService := failingEnqueueTaskService{
+		TaskService: service.NewTaskService(testHandler.Queries, testHandler.Hub, testHandler.Bus),
+		err:         errors.New("forced task insert failure"),
+	}
+	testHandler.TaskService = failingService
+	testHandler.TaskServiceFactory = func(*db.Queries) taskQueueService {
+		return failingService
+	}
+	t.Cleanup(func() {
+		testHandler.TaskService = originalTaskService
+		testHandler.TaskServiceFactory = originalTaskServiceFactory
+	})
+
+	createRecorder := httptest.NewRecorder()
+	createReq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Update issue should fail when task enqueue fails",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(createRecorder.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode created issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, cleanupErr := testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, created.ID)
+		if cleanupErr != nil {
+			t.Fatalf("failed to clean up issue: %v", cleanupErr)
+		}
+	})
+
+	updateRecorder := httptest.NewRecorder()
+	updateReq := newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	updateReq = withURLParam(updateReq, "id", created.ID)
+	testHandler.UpdateIssue(updateRecorder, updateReq)
+
+	if updateRecorder.Code != http.StatusInternalServerError {
+		t.Fatalf("UpdateIssue: expected 500 when task enqueue fails, got %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+
+	var assigneeID *string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT assignee_id::text FROM issue WHERE id = $1`,
+		created.ID,
+	).Scan(&assigneeID)
+	if err != nil {
+		t.Fatalf("failed to read persisted issue: %v", err)
+	}
+	if assigneeID != nil {
+		t.Fatalf("expected assignee change to roll back, got assignee_id=%s", *assigneeID)
 	}
 }
 

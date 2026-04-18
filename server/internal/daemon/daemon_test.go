@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -81,5 +82,20 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 
 	if isWorkspaceNotFoundError(&requestError{StatusCode: http.StatusInternalServerError, Body: `{"error":"workspace not found"}`}) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
+	}
+}
+
+func TestRuntimeVersionForEntryUsesGatewayWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	version, err := runtimeVersionForEntry(context.Background(), "codex", AgentEntry{
+		Path:           "/nonexistent/codex",
+		GatewayBaseURL: "http://127.0.0.1:17750/v1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeVersionForEntry returned error: %v", err)
+	}
+	if version != "codex gateway (http://127.0.0.1:17750/v1)" {
+		t.Fatalf("unexpected gateway version: %q", version)
 	}
 }

@@ -282,6 +282,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if issue.AssigneeType.Valid && issue.AssigneeID.Valid && h.shouldEnqueueAgentTask(r.Context(), issue) {
+		if _, err := h.TaskServiceFactory(qtx).EnqueueTaskForIssue(r.Context(), issue); err != nil {
+			slog.Warn(
+				"create issue enqueue failed",
+				append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)...,
+			)
+			writeError(w, http.StatusInternalServerError, "failed to enqueue agent task: "+err.Error())
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
@@ -291,13 +302,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
-
-	// Only ready issues in todo are enqueued for agents.
-	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
-		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-		}
-	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -399,7 +403,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin issue update")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	issue, err := qtx.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -445,11 +457,25 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Reconcile task queue when assignee changes (not on status changes —
 	// agents manage issue status themselves via the CLI).
 	if assigneeChanged {
-		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+		taskServiceTx := h.TaskServiceFactory(qtx)
+		if err := taskServiceTx.CancelTasksForIssue(r.Context(), issue.ID); err != nil {
+			slog.Warn("cancel issue tasks failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to reconcile issue tasks: "+err.Error())
+			return
+		}
 
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			if _, err := taskServiceTx.EnqueueTaskForIssue(r.Context(), issue); err != nil {
+				slog.Warn("update issue enqueue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+				writeError(w, http.StatusInternalServerError, "failed to enqueue agent task: "+err.Error())
+				return
+			}
 		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, resp)

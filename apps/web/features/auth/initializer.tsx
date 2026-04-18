@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/features/workspace";
 import { api } from "@/shared/api";
 import { createLogger } from "@/shared/logger";
 import { setLoggedInCookie, clearLoggedInCookie } from "./auth-cookie";
+import { applyShiftosBootstrapSession } from "./bootstrap";
 
 const logger = createLogger("auth");
 
@@ -15,6 +16,11 @@ const logger = createLogger("auth");
  */
 export function AuthInitializer({ children }: { children: ReactNode }) {
   useEffect(() => {
+    const bootstrapSession = applyShiftosBootstrapSession(window);
+    if (bootstrapSession) {
+      setLoggedInCookie();
+    }
+
     const token = localStorage.getItem("multica_token");
     if (!token) {
       clearLoggedInCookie();

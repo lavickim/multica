@@ -31,13 +31,28 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type taskQueueService interface {
+	EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error)
+	EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error)
+	CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error
+	CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error)
+	ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error)
+	StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error)
+	ReportProgress(ctx context.Context, taskID string, workspaceID string, summary string, step, total int)
+	CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error)
+	FailTask(ctx context.Context, taskID pgtype.UUID, errMsg string) (*db.AgentTaskQueue, error)
+	ReconcileAgentStatus(ctx context.Context, agentID pgtype.UUID)
+	LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []service.AgentSkillData
+}
+
 type Handler struct {
 	Queries      *db.Queries
 	DB           dbExecutor
 	TxStarter    txStarter
 	Hub          *realtime.Hub
 	Bus          *events.Bus
-	TaskService  *service.TaskService
+	TaskService  taskQueueService
+	TaskServiceFactory func(*db.Queries) taskQueueService
 	EmailService *service.EmailService
 	PingStore    *PingStore
 	Storage      *storage.S3Storage
@@ -57,6 +72,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Hub:          hub,
 		Bus:          bus,
 		TaskService:  service.NewTaskService(queries, hub, bus),
+		TaskServiceFactory: func(q *db.Queries) taskQueueService {
+			return service.NewTaskService(q, hub, bus)
+		},
 		EmailService: emailService,
 		PingStore:    NewPingStore(),
 		Storage:      s3,

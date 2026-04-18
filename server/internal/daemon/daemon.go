@@ -216,7 +216,7 @@ func (d *Daemon) providerToRuntimeMap() map[string]string {
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
-		version, err := agent.DetectVersion(ctx, entry.Path)
+		version, err := runtimeVersionForEntry(ctx, name, entry)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue
@@ -251,6 +251,13 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		return nil, fmt.Errorf("register runtimes: empty response")
 	}
 	return resp, nil
+}
+
+func runtimeVersionForEntry(ctx context.Context, provider string, entry AgentEntry) (string, error) {
+	if strings.TrimSpace(entry.GatewayBaseURL) != "" {
+		return fmt.Sprintf("%s gateway (%s)", provider, entry.GatewayBaseURL), nil
+	}
+	return agent.DetectVersion(ctx, entry.Path)
 }
 
 // configWatchLoop periodically checks for config file changes and reloads workspaces.
@@ -828,6 +835,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		GatewayBaseURL: entry.GatewayBaseURL,
+		GatewayAPIKey:  entry.GatewayAPIKey,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

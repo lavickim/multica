@@ -76,6 +76,8 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude or codex)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	GatewayBaseURL string
+	GatewayAPIKey  string
 }
 
 // New creates a Backend for the given agent type.

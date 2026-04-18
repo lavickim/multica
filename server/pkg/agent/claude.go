@@ -19,6 +19,10 @@ type claudeBackend struct {
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if strings.TrimSpace(b.cfg.GatewayBaseURL) != "" {
+		return executeViaOpenAIGateway(ctx, "claude", b.cfg, prompt, opts)
+	}
+
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "claude"
@@ -287,7 +291,7 @@ type claudeLogEntry struct {
 }
 
 type claudeMessageContent struct {
-	Role    string             `json:"role"`
+	Role    string               `json:"role"`
 	Content []claudeContentBlock `json:"content"`
 }
 

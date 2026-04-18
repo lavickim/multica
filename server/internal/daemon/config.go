@@ -11,15 +11,15 @@ import (
 )
 
 const (
-	DefaultServerURL            = "ws://localhost:8080/ws"
-	DefaultPollInterval         = 3 * time.Second
-	DefaultHeartbeatInterval    = 15 * time.Second
-	DefaultAgentTimeout         = 2 * time.Hour
-	DefaultRuntimeName          = "Local Agent"
+	DefaultServerURL             = "ws://localhost:8080/ws"
+	DefaultPollInterval          = 3 * time.Second
+	DefaultHeartbeatInterval     = 15 * time.Second
+	DefaultAgentTimeout          = 2 * time.Hour
+	DefaultRuntimeName           = "Local Agent"
 	DefaultConfigReloadInterval  = 5 * time.Second
 	DefaultWorkspaceSyncInterval = 30 * time.Second
 	DefaultHealthPort            = 19514
-	DefaultMaxConcurrentTasks   = 20
+	DefaultMaxConcurrentTasks    = 20
 )
 
 // Config holds all daemon configuration.
@@ -70,22 +70,44 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// Probe available agent CLIs
 	agents := map[string]AgentEntry{}
+	claudeGatewayBaseURL, err := gatewayBaseURLFromEnv(
+		"MULTICA_CLAUDE_GATEWAY_BASE_URL",
+		"SHIFTOS_CLAUDE_GATEWAY_HOST",
+		"SHIFTOS_CLAUDE_GATEWAY_PORT",
+		17755,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
-	if _, err := exec.LookPath(claudePath); err == nil {
+	if _, err := exec.LookPath(claudePath); err == nil || claudeGatewayBaseURL != "" {
 		agents["claude"] = AgentEntry{
-			Path:  claudePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+			Path:           claudePath,
+			Model:          strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+			GatewayBaseURL: claudeGatewayBaseURL,
+			GatewayAPIKey:  strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_GATEWAY_API_KEY")),
 		}
 	}
+	codexGatewayBaseURL, err := gatewayBaseURLFromEnv(
+		"MULTICA_CODEX_GATEWAY_BASE_URL",
+		"SHIFTOS_CODEX_GATEWAY_HOST",
+		"SHIFTOS_CODEX_GATEWAY_PORT",
+		17750,
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
-	if _, err := exec.LookPath(codexPath); err == nil {
+	if _, err := exec.LookPath(codexPath); err == nil || codexGatewayBaseURL != "" {
 		agents["codex"] = AgentEntry{
-			Path:  codexPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
+			Path:           codexPath,
+			Model:          strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
+			GatewayBaseURL: codexGatewayBaseURL,
+			GatewayAPIKey:  strings.TrimSpace(os.Getenv("MULTICA_CODEX_GATEWAY_API_KEY")),
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude or codex and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent runtime found: install claude/codex or configure MULTICA_*_GATEWAY_BASE_URL")
 	}
 
 	// Host info
@@ -217,6 +239,40 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 		u.Path = ""
 	}
 	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func gatewayBaseURLFromEnv(baseEnv, hostEnv, portEnv string, defaultPort int) (string, error) {
+	if raw := strings.TrimSpace(os.Getenv(baseEnv)); raw != "" {
+		return normalizeGatewayBaseURL(raw, baseEnv)
+	}
+
+	host := strings.TrimSpace(os.Getenv(hostEnv))
+	port := strings.TrimSpace(os.Getenv(portEnv))
+	if host == "" && port == "" {
+		return "", nil
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = fmt.Sprintf("%d", defaultPort)
+	}
+	return normalizeGatewayBaseURL(fmt.Sprintf("http://%s:%s/v1", host, port), hostEnv+"/"+portEnv)
+}
+
+func normalizeGatewayBaseURL(raw, source string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: %w", source, err)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("%s must use http or https", source)
+	}
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil

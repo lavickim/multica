@@ -29,6 +29,14 @@ func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskServ
 	return &TaskService{Queries: q, Hub: hub, Bus: bus}
 }
 
+func (s *TaskService) WithQueries(q *db.Queries) *TaskService {
+	return &TaskService{
+		Queries: q,
+		Hub:     s.Hub,
+		Bus:     s.Bus,
+	}
+}
+
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.

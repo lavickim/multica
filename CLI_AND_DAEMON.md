@@ -157,8 +157,34 @@ Agent-specific overrides:
 |----------|-------------|
 | `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
+| `MULTICA_CLAUDE_GATEWAY_BASE_URL` | Route Claude tasks through an OpenAI-compatible gateway instead of spawning the Claude CLI directly |
+| `MULTICA_CLAUDE_GATEWAY_API_KEY` | Optional API key sent to the Claude gateway (`not-needed` by default for local gateways) |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_CODEX_GATEWAY_BASE_URL` | Route Codex tasks through an OpenAI-compatible gateway instead of spawning the Codex CLI directly |
+| `MULTICA_CODEX_GATEWAY_API_KEY` | Optional API key sent to the Codex gateway (`not-needed` by default for local gateways) |
+
+When these gateway URLs are set, the daemon uses the gateway runtime even if the local provider binary path is missing or intentionally invalid. This is useful when you want Multica to reuse a local control-plane gateway such as ShiftOS instead of incurring direct provider API usage from the agent runtime.
+
+### ShiftOS Local Gateway Mode
+
+If you run ShiftOS on the same machine, the daemon can derive gateway URLs from the existing ShiftOS launchd ports:
+
+```bash
+export SHIFTOS_CLAUDE_GATEWAY_HOST=127.0.0.1
+export SHIFTOS_CLAUDE_GATEWAY_PORT=17755
+export SHIFTOS_CODEX_GATEWAY_HOST=127.0.0.1
+export SHIFTOS_CODEX_GATEWAY_PORT=17750
+```
+
+Or pin them explicitly:
+
+```bash
+export MULTICA_CLAUDE_GATEWAY_BASE_URL=http://127.0.0.1:17755/v1
+export MULTICA_CODEX_GATEWAY_BASE_URL=http://127.0.0.1:17750/v1
+```
+
+This keeps Multica task execution on the local machine's gateway layer and avoids direct provider API calls from the daemon itself.
 
 ### Self-Hosted Server
 

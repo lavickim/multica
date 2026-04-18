@@ -2,8 +2,10 @@ package daemon
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path           string // path to CLI binary
+	Model          string // model override (optional)
+	GatewayBaseURL string // OpenAI-compatible gateway base URL (optional)
+	GatewayAPIKey  string // gateway API key override (optional)
 }
 
 // Runtime represents a registered daemon runtime.
@@ -23,14 +25,14 @@ type RepoData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID             string     `json:"id"`
-	AgentID        string     `json:"agent_id"`
-	RuntimeID      string     `json:"runtime_id"`
-	IssueID        string     `json:"issue_id"`
-	WorkspaceID    string     `json:"workspace_id"`
-	Agent          *AgentData `json:"agent,omitempty"`
-	Repos          []RepoData `json:"repos,omitempty"`
-	PriorSessionID   string     `json:"prior_session_id,omitempty"`    // Claude session ID from a previous task on this issue
+	ID               string     `json:"id"`
+	AgentID          string     `json:"agent_id"`
+	RuntimeID        string     `json:"runtime_id"`
+	IssueID          string     `json:"issue_id"`
+	WorkspaceID      string     `json:"workspace_id"`
+	Agent            *AgentData `json:"agent,omitempty"`
+	Repos            []RepoData `json:"repos,omitempty"`
+	PriorSessionID   string     `json:"prior_session_id,omitempty"`   // Claude session ID from a previous task on this issue
 	PriorWorkDir     string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
 	TriggerCommentID string     `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 }
